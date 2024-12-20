@@ -1,3 +1,7 @@
 export interface DocumentScannerPlugin {
-  echo(options: { value: string }): Promise<{ value: string }>;
+  startScan(): Promise<{ 
+    pdfUri?: string; 
+    pdfPageCount?: number; 
+    imageUris?: string[];
+  }>;
 }
