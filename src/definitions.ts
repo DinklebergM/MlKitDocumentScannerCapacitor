@@ -2,7 +2,7 @@ export interface StartScanOptions {
   pageLimit?: number;
   galleryImportAllowed?: boolean;
   scannerMode?: 'SCANNER_MODE_BASE' | 'SCANNER_MODE_BASE_WITH_FILTER' | 'SCANNER_MODE_FULL';
-  resultFormats?: ('JPEG' | 'PDF')[];
+  resultFormat?: ('JPEG' | 'PDF');
 }
 
 export interface Page {
