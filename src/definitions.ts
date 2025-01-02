@@ -3,6 +3,7 @@ export interface StartScanOptions {
   galleryImportAllowed?: boolean;
   scannerMode?: 'SCANNER_MODE_BASE' | 'SCANNER_MODE_BASE_WITH_FILTER' | 'SCANNER_MODE_FULL';
   resultFormat?: ('JPEG' | 'PDF');
+  lowerQuality?: number;
 }
 
 export interface Page {
