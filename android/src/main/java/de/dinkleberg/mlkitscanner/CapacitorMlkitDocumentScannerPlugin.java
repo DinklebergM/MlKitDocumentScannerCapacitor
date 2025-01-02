@@ -3,11 +3,14 @@ package de.dinkleberg.mlkitscanner;
 import android.app.Activity;
 import android.content.ContentValues;
 import android.content.Intent;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.MediaStore;
 import android.util.Log;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -87,6 +90,7 @@ public class CapacitorMlkitDocumentScannerPlugin extends Plugin {
         boolean galleryImportAllowed = call.getBoolean("galleryImportAllowed", true);
         String scannerMode = call.getString("scannerMode", "SCANNER_MODE_FULL");
         String resultFormat = call.getString("resultFormats", "PDF");
+        int lowerQuality = call.getInt("lowerQuality", 100);
 
         GmsDocumentScannerOptions.Builder builder = new GmsDocumentScannerOptions.Builder()
                 .setGalleryImportAllowed(galleryImportAllowed);
@@ -159,9 +163,11 @@ public class CapacitorMlkitDocumentScannerPlugin extends Plugin {
             List<JSObject> pagesArray = new ArrayList<>();
             for (int i = 0; i < pageCount; i++) {
                 String imagePath = scanningResult.getPages().get(i).getImageUri().toString();
-                moveFileToDownloads(imagePath, "scanned_page_" + (i + 1) + ".jpg");
+                String reducedImagePath = reduceImageQuality(imagePath, "scanned_page_" + (i + 1) + ".jpg",
+                        call.getInt("lowerQuality", 100));
+                moveFileToDownloads(reducedImagePath, "scanned_page_" + (i + 1) + ".jpg");
                 JSObject pageData = new JSObject();
-                pageData.put("imageUri", imagePath);
+                pageData.put("imageUri", reducedImagePath);
                 pagesArray.add(pageData);
             }
             resultObject.put("pages", pagesArray);
@@ -170,6 +176,41 @@ public class CapacitorMlkitDocumentScannerPlugin extends Plugin {
         Log.d("CapacitorMlkitDocScan", "Scan result: " + resultObject.toString());
 
         call.resolve(resultObject);
+    }
+
+    private String reduceImageQuality(String sourcePath, String fileName, int quality) {
+        InputStream inputStream = null;
+        OutputStream outputStream = null;
+        String reducedImagePath = null;
+
+        try {
+            File sourceFile = new File(sourcePath.replace("file://", ""));
+            inputStream = getActivity().getContentResolver().openInputStream(Uri.fromFile(sourceFile));
+            Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
+
+            File downloadsDir = getActivity().getCacheDir();
+            File reducedImageFile = new File(downloadsDir, fileName);
+            outputStream = new FileOutputStream(reducedImageFile);
+
+            Bitmap.CompressFormat format = fileName.endsWith(".png") ? Bitmap.CompressFormat.PNG
+                    : Bitmap.CompressFormat.JPEG;
+            bitmap.compress(format, quality, outputStream);
+
+            reducedImagePath = reducedImageFile.getAbsolutePath();
+        } catch (IOException e) {
+            Log.e("CapacitorMlkitDocScan", "Failed to reduce image quality: " + e.getMessage(), e);
+        } finally {
+            try {
+                if (inputStream != null)
+                    inputStream.close();
+                if (outputStream != null)
+                    outputStream.close();
+            } catch (IOException e) {
+                Log.e("CapacitorMlkitDocScan", "Failed to close streams: " + e.getMessage(), e);
+            }
+        }
+
+        return reducedImagePath;
     }
 
     private void moveFileToDownloads(String sourcePath, String fileName) {
@@ -185,7 +226,8 @@ public class CapacitorMlkitDocumentScannerPlugin extends Plugin {
                 ContentValues values = new ContentValues();
                 values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
                 values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
-                values.put(MediaStore.MediaColumns.MIME_TYPE, fileName.endsWith(".jpg") ? "image/jpeg" : "application/pdf");
+                values.put(MediaStore.MediaColumns.MIME_TYPE,
+                        fileName.endsWith(".jpg") ? "image/jpeg" : "application/pdf");
 
                 Uri uri = getActivity().getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values);
 
@@ -219,8 +261,10 @@ public class CapacitorMlkitDocumentScannerPlugin extends Plugin {
             Log.e("CapacitorMlkitDocScan", "Failed to move file: " + e.getMessage(), e);
         } finally {
             try {
-                if (inputStream != null) inputStream.close();
-                if (outputStream != null) outputStream.close();
+                if (inputStream != null)
+                    inputStream.close();
+                if (outputStream != null)
+                    outputStream.close();
             } catch (IOException e) {
                 Log.e("CapacitorMlkitDocScan", "Failed to close streams: " + e.getMessage(), e);
             }
