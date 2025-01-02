@@ -69,6 +69,6 @@ startScan(options: StartScanOptions) => Promise<ScanResult>
 | **`pageLimit`**            | <code>number</code>                                                                        |
 | **`galleryImportAllowed`** | <code>boolean</code>                                                                       |
 | **`scannerMode`**          | <code>'SCANNER_MODE_BASE' \| 'SCANNER_MODE_BASE_WITH_FILTER' \| 'SCANNER_MODE_FULL'</code> |
-| **`resultFormats`**        | <code>('JPEG' \| 'PDF')[]</code>                                                           |
+| **`resultFormat`**         | <code>'JPEG' \| 'PDF'</code>                                                               |
 
 </docgen-api>
