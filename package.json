@@ -1,6 +1,6 @@
 {
   "name": "capacitor-mlkit-document-scanner",
-  "version": "1.0.3-lowerQuality",
+  "version": "1.0.3-lowerQuality.2",
   "description": "A Capacitor plugin for ML Kit Document Scanner",
   "main": "dist/plugin.cjs.js",
   "module": "dist/esm/index.js",

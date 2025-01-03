@@ -42,6 +42,10 @@ import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult;
 import java.util.ArrayList;
 import java.util.List;
 
+import android.graphics.pdf.PdfDocument;
+import android.os.ParcelFileDescriptor;
+import android.graphics.pdf.PdfRenderer;
+
 @CapacitorPlugin(name = "CapacitorMlkitDocumentScanner")
 public class CapacitorMlkitDocumentScannerPlugin extends Plugin {
 
@@ -89,8 +93,8 @@ public class CapacitorMlkitDocumentScannerPlugin extends Plugin {
         int pageLimit = call.getInt("pageLimit", 0);
         boolean galleryImportAllowed = call.getBoolean("galleryImportAllowed", true);
         String scannerMode = call.getString("scannerMode", "SCANNER_MODE_FULL");
-        String resultFormat = call.getString("resultFormats", "PDF");
-        int lowerQuality = call.getInt("lowerQuality", 100);
+        String resultFormat = call.getString("resultFormat", "PDF");
+        int lowerQuality = call.getInt("lowerQuality", 50);
 
         GmsDocumentScannerOptions.Builder builder = new GmsDocumentScannerOptions.Builder()
                 .setGalleryImportAllowed(galleryImportAllowed);
@@ -157,18 +161,30 @@ public class CapacitorMlkitDocumentScannerPlugin extends Plugin {
 
         if (scanningResult.getPdf() != null) {
             String pdfPath = scanningResult.getPdf().getUri().toString();
-            moveFileToDownloads(pdfPath, "scanned_document.pdf");
-            resultObject.put("pdfUri", pdfPath);
+            String reducedPdfPath = reducePdfResolution(pdfPath, "reduced_scanned_document.pdf",
+                    call.getInt("lowerQuality", 50));
+            moveFileToDownloads(reducedPdfPath, "reduced_scanned_document.pdf");
+            resultObject.put("pdfUri", reducedPdfPath);
         } else {
             List<JSObject> pagesArray = new ArrayList<>();
             for (int i = 0; i < pageCount; i++) {
                 String imagePath = scanningResult.getPages().get(i).getImageUri().toString();
-                String reducedImagePath = reduceImageQuality(imagePath, "scanned_page_" + (i + 1) + ".jpg",
-                        call.getInt("lowerQuality", 100));
-                moveFileToDownloads(reducedImagePath, "scanned_page_" + (i + 1) + ".jpg");
-                JSObject pageData = new JSObject();
-                pageData.put("imageUri", reducedImagePath);
-                pagesArray.add(pageData);
+
+                if (call.getInt("lowerQuality", 100) != 100) {
+                    String reducedImagePath = reduceImageQuality(imagePath, "scanned_page_" + (i + 1) + ".jpg",
+                            call.getInt("lowerQuality", 100));
+                    moveFileToDownloads(reducedImagePath, "scanned_page_" + (i + 1) + ".jpg");
+                  JSObject pageData = new JSObject();
+                  pageData.put("imageUri", reducedImagePath);
+                  pagesArray.add(pageData);
+                } else {
+                    moveFileToDownloads(imagePath, "scanned_page_" + (i + 1) + ".jpg");
+                  JSObject pageData = new JSObject();
+                  pageData.put("imageUri", imagePath);
+                  pagesArray.add(pageData);
+                }
+
+
             }
             resultObject.put("pages", pagesArray);
         }
@@ -184,33 +200,119 @@ public class CapacitorMlkitDocumentScannerPlugin extends Plugin {
         String reducedImagePath = null;
 
         try {
+            Log.d("CapacitorMlkitDocScan", "Starting image quality reduction process");
             File sourceFile = new File(sourcePath.replace("file://", ""));
+            Log.d("CapacitorMlkitDocScan", "Source file path: " + sourceFile.getAbsolutePath());
+
+            // Nur für JPG-Dateien weiterarbeiten
+            // Optional: Prüfen, ob es sich überhaupt um eine gültige JPG-Datei handelt
+            // (z. B. wenn fileName auf ".jpg" oder ".jpeg" endet)
+            if (!fileName.toLowerCase().endsWith(".jpg") && !fileName.toLowerCase().endsWith(".jpeg")) {
+                Log.d("CapacitorMlkitDocScan", "Keine JPG-Datei. Kompression wird übersprungen.");
+                return sourcePath; // oder null, je nach Bedarf
+            }
+
             inputStream = getActivity().getContentResolver().openInputStream(Uri.fromFile(sourceFile));
             Bitmap bitmap = BitmapFactory.decodeStream(inputStream);
+            Log.d("CapacitorMlkitDocScan", "Bitmap successfully decoded");
 
             File downloadsDir = getActivity().getCacheDir();
             File reducedImageFile = new File(downloadsDir, fileName);
             outputStream = new FileOutputStream(reducedImageFile);
+            Log.d("CapacitorMlkitDocScan", "Output file path: " + reducedImageFile.getAbsolutePath());
 
-            Bitmap.CompressFormat format = fileName.endsWith(".png") ? Bitmap.CompressFormat.PNG
-                    : Bitmap.CompressFormat.JPEG;
-            bitmap.compress(format, quality, outputStream);
+            // Immer JPEG-Kompression verwenden
+            bitmap.compress(Bitmap.CompressFormat.JPEG, quality, outputStream);
+            Log.d("CapacitorMlkitDocScan", "Image compression completed with quality = " + quality);
 
             reducedImagePath = reducedImageFile.getAbsolutePath();
+            Log.d("CapacitorMlkitDocScan", "Reduced image path: " + reducedImagePath);
+
         } catch (IOException e) {
             Log.e("CapacitorMlkitDocScan", "Failed to reduce image quality: " + e.getMessage(), e);
         } finally {
             try {
-                if (inputStream != null)
+                if (inputStream != null) {
                     inputStream.close();
-                if (outputStream != null)
+                    Log.d("CapacitorMlkitDocScan", "Input stream closed");
+                }
+                if (outputStream != null) {
                     outputStream.close();
+                    Log.d("CapacitorMlkitDocScan", "Output stream closed");
+                }
             } catch (IOException e) {
                 Log.e("CapacitorMlkitDocScan", "Failed to close streams: " + e.getMessage(), e);
             }
         }
 
         return reducedImagePath;
+    }
+
+    private String reducePdfResolution(String sourcePdfPath, String outputPdfName, int quality) {
+        ParcelFileDescriptor parcelFileDescriptor = null;
+        PdfRenderer pdfRenderer = null;
+        PdfDocument pdfDocument = null;
+        String outputPdfPath = null;
+
+        try {
+            // Open the source PDF file
+            File sourceFile = new File(sourcePdfPath.replace("file://", ""));
+            parcelFileDescriptor = ParcelFileDescriptor.open(sourceFile, ParcelFileDescriptor.MODE_READ_ONLY);
+            pdfRenderer = new PdfRenderer(parcelFileDescriptor);
+
+            // Create a new PDF document for the output
+            File downloadsDir = getActivity().getCacheDir();
+            File outputPdfFile = new File(downloadsDir, outputPdfName);
+            pdfDocument = new PdfDocument();
+
+            for (int i = 0; i < pdfRenderer.getPageCount(); i++) {
+                PdfRenderer.Page page = pdfRenderer.openPage(i);
+
+                // Render the page to a bitmap
+                Bitmap bitmap = Bitmap.createBitmap(page.getWidth(), page.getHeight(), Bitmap.Config.ARGB_8888);
+                page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY);
+
+                // Compress the bitmap to reduce quality
+                ByteArrayOutputStream compressedBitmapStream = new ByteArrayOutputStream();
+                bitmap.compress(Bitmap.CompressFormat.JPEG, quality, compressedBitmapStream);
+                Bitmap compressedBitmap = BitmapFactory.decodeByteArray(compressedBitmapStream.toByteArray(), 0,
+                        compressedBitmapStream.size());
+
+                // Add the compressed bitmap as a page in the new PDF
+                PdfDocument.PageInfo pageInfo = new PdfDocument.PageInfo.Builder(page.getWidth(), page.getHeight(),
+                        i + 1).create();
+                PdfDocument.Page newPage = pdfDocument.startPage(pageInfo);
+                newPage.getCanvas().drawBitmap(compressedBitmap, 0, 0, null);
+                pdfDocument.finishPage(newPage);
+
+                // Cleanup
+                page.close();
+                bitmap.recycle();
+                compressedBitmap.recycle();
+            }
+
+            // Write the new PDF to file
+            OutputStream outputStream = new FileOutputStream(outputPdfFile);
+            pdfDocument.writeTo(outputStream);
+            outputStream.close();
+            outputPdfPath = outputPdfFile.getAbsolutePath();
+
+        } catch (IOException e) {
+            Log.e("CapacitorMlkitDocScan", "Failed to reduce PDF resolution: " + e.getMessage(), e);
+        } finally {
+            try {
+                if (parcelFileDescriptor != null)
+                    parcelFileDescriptor.close();
+                if (pdfRenderer != null)
+                    pdfRenderer.close();
+                if (pdfDocument != null)
+                    pdfDocument.close();
+            } catch (IOException e) {
+                Log.e("CapacitorMlkitDocScan", "Failed to close resources: " + e.getMessage(), e);
+            }
+        }
+
+        return outputPdfPath;
     }
 
     private void moveFileToDownloads(String sourcePath, String fileName) {
